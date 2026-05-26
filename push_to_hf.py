@@ -27,8 +27,11 @@ def parse_args():
     parser.add_argument('--model-path', type=str,
                        default='exported_fastai_models/eva02_large_patch14_448.mim_m38m_ft_in22k_in1k_ml.pkl',
                        help='Path to the FastAI model pkl file')
+    parser.add_argument('--model-card', type=str,
+                       default='hf_model_card.md',
+                       help='Path to the model card markdown file')
     parser.add_argument('--repo-id', type=str,
-                       default='brunoasm/Cicindella_ID_FMNH',
+                       default='brunoasm/Cicindela_Platydracus_ID_FMNH',
                        help='HuggingFace repository ID')
     parser.add_argument('--dry-run', action='store_true',
                        help='Print configuration without uploading')
@@ -36,30 +39,49 @@ def parse_args():
 
 
 def classify_label(label):
-    """Return 'genus' / 'species' / 'subspecies' for a vocabulary entry."""
+    """Return 'genus' / 'species_group' / 'species' / 'subspecies' for a vocabulary entry."""
     if not label:
         return 'species'
     if label[:1].isupper():
         return 'genus'
+    if 'group_' in label:
+        return 'species_group'
     return 'species' if label.count('_') == 1 else 'subspecies'
 
 def extract_vocab_from_learner(learn):
-    """Extract the vocabulary/label list from the FastAI learner"""
-    try:
-        # Get vocabulary from the learner's dataloaders
-        vocab = learn.dls.vocab
+    """Extract the full union vocabulary from the FastAI learner.
+
+    Multi-head models store labels inside a MultiHeadTarget transform rather
+    than directly on the dataloaders, so we recover them from there.
+    """
+    # Multi-head path: find the MultiHeadTarget transform buried in dls.tls
+    mht = None
+    for tl in learn.dls.tls:
+        for t in tl.tfms.fs:
+            if type(t).__name__ == 'MultiHeadTarget':
+                mht = t
+                break
+        if mht is not None:
+            break
+    if mht is not None:
+        vocab_g = list(mht.vocab_g)
+        vocab_cic = [l for l, _ in sorted(mht.cic2idx.items(), key=lambda kv: kv[1])]
+        vocab_platy = [l for l, _ in sorted(mht.platy2idx.items(), key=lambda kv: kv[1])]
+        return vocab_g + vocab_cic + vocab_platy
+
+    # Single-head fallback: try standard fastai vocab attributes
+    for attr in ('vocab', 'vocab_g'):
         try:
-            # Convert to list if it's a vocab object
-            vocab_list = list(vocab.items())
-        except TypeError:
-            if isinstance(vocab, (list, tuple)):
-                vocab_list = list(vocab)
-            else:
-                vocab_list = [str(v) for v in vocab]
-        return vocab_list
-    except Exception as e:
-        print(f"Warning: Could not extract vocabulary: {e}")
-        return None
+            raw = getattr(learn.dls, attr)
+            try:
+                return list(raw.items())
+            except (TypeError, AttributeError):
+                return [str(v) for v in raw]
+        except AttributeError:
+            continue
+
+    print("Warning: Could not extract vocabulary from learn.dls")
+    return None
 
 def create_taxon_config(learn, base_config, repo_id):
     """
@@ -67,15 +89,16 @@ def create_taxon_config(learn, base_config, repo_id):
     Platydracus) based on the base timm config and the trained FastAI learner.
     """
     vocab = extract_vocab_from_learner(learn)
-    num_classes = len(vocab) if vocab else len(learn.dls.vocab)
+    num_classes = len(vocab) if vocab is not None else None
 
     if vocab:
         genus_count = sum(1 for l in vocab if classify_label(l) == 'genus')
+        species_group_count = sum(1 for l in vocab if classify_label(l) == 'species_group')
         species_count = sum(1 for l in vocab if classify_label(l) == 'species')
         subspecies_count = sum(1 for l in vocab if classify_label(l) == 'subspecies')
         genera = sorted(l for l in vocab if classify_label(l) == 'genus')
     else:
-        genus_count = species_count = subspecies_count = None
+        genus_count = species_group_count = species_count = subspecies_count = None
         genera = None
 
     config = {
@@ -107,6 +130,7 @@ def create_taxon_config(learn, base_config, repo_id):
         "dataset": "FMNH_Cicindela_Platydracus_specimens",
         "genera": genera,
         "genus_count": genus_count,
+        "species_group_count": species_group_count,
         "species_count": species_count,
         "subspecies_count": subspecies_count,
         "label_threshold": 0.5,
@@ -153,9 +177,10 @@ def main():
     vocab = extract_vocab_from_learner(learn)
     print(f"Model vocabulary size: {len(vocab) if vocab else 'Unknown'}")
     if vocab:
-        print(f"Genus labels:      {sum(1 for l in vocab if classify_label(l) == 'genus')}")
-        print(f"Species labels:    {sum(1 for l in vocab if classify_label(l) == 'species')}")
-        print(f"Subspecies labels: {sum(1 for l in vocab if classify_label(l) == 'subspecies')}")
+        print(f"Genus labels:         {sum(1 for l in vocab if classify_label(l) == 'genus')}")
+        print(f"Species group labels: {sum(1 for l in vocab if classify_label(l) == 'species_group')}")
+        print(f"Species labels:       {sum(1 for l in vocab if classify_label(l) == 'species')}")
+        print(f"Subspecies labels:    {sum(1 for l in vocab if classify_label(l) == 'subspecies')}")
     
     # Base configuration from the pretrained timm model
     base_config = {
@@ -184,10 +209,17 @@ def main():
     # Create custom configuration
     config = create_taxon_config(learn, base_config, args.repo_id)
     
+    model_card_path = Path(args.model_card)
+    if not model_card_path.exists():
+        print(f"Warning: model card not found at {model_card_path}, skipping README upload")
+        model_card_path = None
+
     if args.dry_run:
         print("\nDry run - Configuration that would be uploaded:")
         print(json.dumps(config, indent=2))
         print(f"\nWould upload to repository: {args.repo_id}")
+        if model_card_path:
+            print(f"Would upload model card from: {model_card_path}")
         return
     
     print(f"Uploading to repository: {args.repo_id}")
@@ -215,9 +247,9 @@ def main():
         # Upload FastAI model
         print("Uploading FastAI learner...")
         push_to_hub_fastai(
-            learner=learn, 
+            learner=learn,
             repo_id=args.repo_id,
-            commit_message="Upload Cicindela+Platydracus multilabel classification model (FastAI)"
+            commit_message="Upload Cicindela+Platydracus multilabel classification model (FastAI, 4-level hierarchy)"
         )
         
         # Upload additional files using HfApi
@@ -248,7 +280,17 @@ def main():
                 repo_id=args.repo_id,
                 commit_message="Add model vocabulary"
             )
-        
+
+        # Upload model card
+        if model_card_path:
+            print("Uploading model card...")
+            api.upload_file(
+                path_or_fileobj=str(model_card_path),
+                path_in_repo="README.md",
+                repo_id=args.repo_id,
+                commit_message="Update model card for Cicindela+Platydracus joint classifier"
+            )
+
         print(f"Successfully uploaded model to: https://huggingface.co/{args.repo_id}")
         
     finally:
