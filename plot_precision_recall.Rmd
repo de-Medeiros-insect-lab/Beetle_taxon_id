@@ -20,6 +20,7 @@ set.seed(1324)
 library(tidyverse)
 library(ggthemes)
 library(cowplot)
+library(ggtext)
 ```
 
 The exported CSV (`test_results_<arch>.csv`) carries a `genus` column and a `taxonomic_level` column computed by the notebook. We recompute `taxonomic_level` here defensively (in case the CSV is older), using the label-format rule: capitalized → genus, `<genus>group_<group>` → species_group, exactly one `_` → species, two or more `_` → subspecies.
@@ -170,7 +171,14 @@ precision_recall_plot <- ggplot() +
   ylab("Precision") +
   facet_grid(genus ~ taxonomic_level) +
   theme_minimal() +
-  theme(text = element_text(size=9))
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold"),
+    strip.text.x = element_text(face = "bold", size = 12),
+    strip.text.y = element_text(face = "bold.italic", size = 12),
+    legend.title = element_text(face = "bold")
+  )
 
 print(precision_recall_plot)
 ```
@@ -236,13 +244,23 @@ dist_plot <- ggplot(plot_data) +
     bins = 50,
     position = "dodge"
   ) +
-  scale_fill_brewer(palette = "Set2") +
+  scale_fill_brewer(
+    palette = "Set2",
+    labels = c("Cicindela" = "*Cicindela*", "Platydracus" = "*Platydracus*"),
+    name = NULL
+  ) +
   scale_x_log10(breaks=c(1,2,5,10,20,50,100,200,500)) +
   ggtitle("Label frequency") +
   xlab(NULL) +
   ylab("Count") +
   theme_minimal() +
-  theme(text = element_text(size=9), legend.position = "bottom")
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold"),
+    legend.text = element_markdown(size = 12),
+    legend.position = "bottom"
+  )
 
 dist_plot
 ```
@@ -315,18 +333,26 @@ f1_plot <- ggplot() +
   scale_color_manual(
     values = curve_colors,
     breaks = c("Cicindela", "Platydracus", "Platydracus femoratus group"),
+    labels = c("*Cicindela*", "*Platydracus*", "*Platydracus femoratus* group"),
     name = NULL
   ) +
   scale_linetype_manual(
     values = curve_linetypes,
     breaks = c("Cicindela", "Platydracus", "Platydracus femoratus group"),
+    labels = c("*Cicindela*", "*Platydracus*", "*Platydracus femoratus* group"),
     name = NULL
   ) +
-  ggtitle("F1 score by training sample size (species level)") +
+  ggtitle("F1 score by training sample size\n(species level)") +
   xlab("Number of training samples") +
   ylab("F1 score") +
   theme_minimal() +
-  theme(text = element_text(size = 9), legend.position = "bottom")
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold"),
+    legend.text = element_markdown(size = 12),
+    legend.position = "bottom"
+  )
 
 f1_plot
 ```
@@ -370,6 +396,7 @@ p_AB <- cowplot::plot_grid(
   f1_plot + theme(legend.position = 'none'),
   ncol = 1,
   labels = "AUTO",
+  label_size = 18,
   align = 'hv',
   axis = 'lrtb'
 )
@@ -379,7 +406,8 @@ top_row <- cowplot::plot_grid(
   precision_recall_plot + theme(legend.position = 'none'),
   rel_widths = c(0.8, 1.2),
   nrow = 1,
-  labels = c("", "C")
+  labels = c("", "C"),
+  label_size = 18
 )
 
 legend_row <- cowplot::plot_grid(
@@ -430,7 +458,7 @@ performance_data %>%
   filter(taxon %in% c("cicindela_sylvicola", "Cicindela", "Platydracus","platydracusgroup_femoratus"))
 ```
 
-```{r taxon-lookup}
+```{r taxon-lookup-femoratus}
 performance_data %>%
   filter(species_group %in% c("femoratus"))
 ```
