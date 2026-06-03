@@ -21,6 +21,7 @@ library(tidyverse)
 library(ggthemes)
 library(cowplot)
 library(ggtext)
+library(ggh4x)
 ```
 
 The exported CSV (`test_results_<arch>.csv`) carries a `genus` column and a `taxonomic_level` column computed by the notebook. We recompute `taxonomic_level` here defensively (in case the CSV is older), using the label-format rule: capitalized → genus, `<genus>group_<group>` → species_group, exactly one `_` → species, two or more `_` → subspecies.
@@ -169,7 +170,11 @@ precision_recall_plot <- ggplot() +
   ggtitle("Precision and Recall") +
   xlab("Recall") +
   ylab("Precision") +
-  facet_grid(genus ~ taxonomic_level) +
+  ggh4x::facet_grid2(
+    genus ~ taxonomic_level,
+    render_empty = FALSE,
+    labeller = labeller(taxonomic_level = function(x) str_replace_all(x, "_", " "))
+  ) +
   theme_minimal() +
   theme(
     text = element_text(size = 12),
@@ -333,13 +338,13 @@ f1_plot <- ggplot() +
   scale_color_manual(
     values = curve_colors,
     breaks = c("Cicindela", "Platydracus", "Platydracus femoratus group"),
-    labels = c("*Cicindela*", "*Platydracus*", "*Platydracus femoratus* group"),
+    labels = c("*Cicindela*", "*Platydracus*", "*P. femoratus* group"),
     name = NULL
   ) +
   scale_linetype_manual(
     values = curve_linetypes,
     breaks = c("Cicindela", "Platydracus", "Platydracus femoratus group"),
-    labels = c("*Cicindela*", "*Platydracus*", "*Platydracus femoratus* group"),
+    labels = c("*Cicindela*", "*Platydracus*", "*P. femoratus* group"),
     name = NULL
   ) +
   ggtitle("F1 score by training sample size\n(species level)") +
